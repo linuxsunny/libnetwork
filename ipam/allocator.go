@@ -585,3 +585,42 @@ func (a *Allocator) DumpDatabase() string {
 
 	return s
 }
+
+func (a *Allocator) Usage(poolID string) (uint64, uint64, error) {
+	log.Debugf("CalUsage(%s)", poolID)
+	k := SubnetKey{}
+	if err := k.FromString(poolID); err != nil {
+		return 0, 0, types.BadRequestErrorf("invalid pool id: %s", poolID)
+	}
+
+	aSpace, err := a.getAddrSpace(k.AddressSpace)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	aSpace.Lock()
+	p, ok := aSpace.subnets[k]
+	if !ok {
+		aSpace.Unlock()
+		return 0, 0, types.NotFoundErrorf("cannot find address pool for poolID:%s", poolID)
+	}
+
+	c := p
+	for c.Range != nil {
+		k = c.ParentKey
+		c, ok = aSpace.subnets[k]
+	}
+	aSpace.Unlock()
+
+	bm, err := a.retrieveBitmask(k, c.Pool)
+	if err != nil {
+		return 0, 0, types.InternalErrorf("could not find bitmask in datastore for %s on cal pool usage request from pool %s: %v",
+			k.String(), poolID, err)
+	}
+
+	if bm.Bits() == 0 {
+		return 0, 0, nil
+	} else {
+		return bm.Unselected(), bm.Bits(), nil
+	}
+}
